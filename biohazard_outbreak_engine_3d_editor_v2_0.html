@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biohazard Outbreak Engine & 3D Editor v2.0</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=VT323&display=swap" rel="stylesheet">
+    
+    <!-- Three.js and Official Addons -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #08090c;
+            font-family: 'Chakra Petch', sans-serif; color: #d1d5db; user-select: none;
+        }
+        .font-retro { font-family: 'VT323', monospace; }
+
+        /* CRT Scanline & Screen Vignette Overlay */
+        .crt-overlay {
+            pointer-events: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.22) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+            background-size: 100% 4px, 6px 100%; opacity: 0.6;
+        }
+        .vignette-overlay {
+            pointer-events: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 11; box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.85);
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #090a0f; }
+        ::-webkit-scrollbar-thumb { background: #222731; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #8b0000; }
+
+        .horror-border-active { border: 1px solid #dc2626; box-shadow: 0 0 14px rgba(220, 38, 38, 0.45); }
+
+        /* ECG Pulse Animation */
+        .hud-ecg-line {
+            stroke: #22c55e; stroke-dasharray: 1000; stroke-dashoffset: 1000;
+            animation: ecg 1.8s linear infinite;
+        }
+        @keyframes ecg { to { stroke-dashoffset: 0; } }
+
+        /* Form Inputs */
+        input[type="number"], input[type="text"], select {
+            background-color: #0d1017; border: 1px solid #1f293d;
+            color: #f3f4f6; padding: 5px 8px; border-radius: 4px; font-size: 0.8rem; width: 100%;
+        }
+        input[type="number"]:focus, input[type="text"]:focus, select:focus {
+            outline: none; border-color: #dc2626; box-shadow: 0 0 6px rgba(220, 38, 38, 0.3);
+        }
+        input[type="range"] { accent-color: #dc2626; }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen overflow-hidden bg-black">
+
+    <!-- Top Engine Header -->
+    <header class="h-12 bg-neutral-950 border-b border-neutral-800 flex items-center justify-between px-4 z-20">
+        <div class="flex items-center space-x-3">
+            <div class="font-retro text-2xl text-red-600 font-bold tracking-widest flex items-center gap-2">
+                <i class="fa-solid fa-biohazard text-red-600 animate-pulse"></i> BIOHAZARD <span class="text-xs text-neutral-400 font-sans tracking-normal">PS2 Engine v2.0 Pro</span>
+            </div>
+        </div>
+
+        <!-- Mode Switches & Lighting Presets -->
+        <div class="flex items-center space-x-2">
+            <button id="btn-mode-editor" onclick="switchEngineMode('EDITOR')" class="px-3 py-1.5 rounded text-xs font-semibold bg-red-950/60 border border-red-700 text-red-200 hover:bg-red-800 transition flex items-center gap-2 horror-border-active">
+                <i class="fa-solid fa-pen-ruler"></i> EDITOR REŽIM
+            </button>
+            <button id="btn-mode-game" onclick="switchEngineMode('GAME')" class="px-3 py-1.5 rounded text-xs font-semibold bg-neutral-900 border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition flex items-center gap-2">
+                <i class="fa-solid fa-play text-green-500"></i> PLAYTEST (RE OUTBREAK)
+            </button>
+            
+            <div class="h-4 w-px bg-neutral-800 mx-1"></div>
+            
+            <!-- Atmosphere Quick Presets -->
+            <select id="preset-atmosphere-select" onchange="applyAtmospherePreset(this.value)" class="bg-neutral-900 border border-neutral-700 text-neutral-300 text-xs py-1 px-2 rounded">
+                <option value="EDITOR_BRIGHT">💡 Světlo: Editor Jasno</option>
+                <option value="HOSPITAL_DIM">🏥 Světlo: Nemocnice Šero</option>
+                <option value="RPD_RED">🚨 Světlo: RPD Poplach Red</option>
+                <option value="DARK_HORROR">🌙 Světlo: Horor Tma</option>
+            </select>
+
+            <!-- Preset Templates -->
+            <select onchange="loadPresetTemplate(this.value)" class="bg-neutral-900 border border-neutral-700 text-neutral-300 text-xs py-1 px-2 rounded">
+                <option value="">-- Načíst Šablonu --</option>
+                <option value="HOSPITAL">Chodba Nemocnice Raccoon City</option>
+                <option value="POLICE">Lobby Policejní Stanice (R.P.D.)</option>
+            </select>
+        </div>
+
+        <!-- Controls & File I/O -->
+        <div class="flex items-center space-x-2 text-xs">
+            <button onclick="exportSceneJSON()" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 px-3 py-1.5 rounded border border-neutral-700 flex items-center gap-1.5">
+                <i class="fa-solid fa-download text-red-500"></i> Export JSON
+            </button>
+            <label class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 px-3 py-1.5 rounded border border-neutral-700 cursor-pointer flex items-center gap-1.5">
+                <i class="fa-solid fa-upload text-blue-500"></i> Import
+                <input type="file" id="import-json-input" class="hidden" onchange="importSceneJSON(event)">
+            </label>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden relative">
+
+        <!-- Left Toolbar / Palette Panel -->
+        <aside id="panel-left" class="w-80 bg-neutral-950 border-r border-neutral-800 flex flex-col z-20">
+            <!-- Palette Tabs -->
+            <div class="flex border-b border-neutral-800 text-xs font-semibold">
+                <button id="tab-btn-build" onclick="switchPaletteTab('BUILD')" class="flex-1 py-2.5 bg-neutral-900 text-red-500 border-b-2 border-red-600 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-cubes"></i> Stavba & Nábytek
+                </button>
+                <button id="tab-btn-entities" onclick="switchPaletteTab('ENTITIES')" class="flex-1 py-2.5 bg-neutral-950 text-neutral-400 hover:text-white flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-users"></i> NPC & Systém
+                </button>
+            </div>
+
+            <!-- Palette Content Area -->
+            <div id="palette-content" class="p-3 overflow-y-auto flex-1 space-y-4">
+                <!-- BUILD TAB CONTENT -->
+                <div id="palette-build-sec" class="space-y-4">
+                    <!-- Placement Assist Config -->
+                    <div class="bg-neutral-900/60 p-2.5 rounded border border-neutral-800/80 space-y-2">
+                        <span class="text-[11px] font-bold text-neutral-400 uppercase tracking-wider block">Mřížka & Přichytávání</span>
+                        <div class="flex items-center justify-between text-xs">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="snap-grid-toggle" onchange="toggleSnapGrid(this.checked)" checked>
+                                <span>Snap k Mřížce (1m)</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" id="snap-rot-toggle" onchange="toggleSnapRot(this.checked)" checked>
+                                <span>Snap Rotace (45°)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Architektura -->
+                    <div>
+                        <div class="text-[11px] font-bold text-red-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <i class="fa-solid fa-building"></i> Architektura
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs">
+                            <button onclick="spawnObject('WALL')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-square-full text-neutral-500"></i> Stěna Plná
+                            </button>
+                            <button onclick="spawnObject('DOORWAY')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-door-open text-amber-600"></i> Rám s Dveřmi
+                            </button>
+                            <button onclick="spawnObject('WINDOW_WALL')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-window-maximize text-blue-400"></i> Stěna s Oknem
+                            </button>
+                            <button onclick="spawnObject('PILLAR')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-grip-lines-vertical text-neutral-400"></i> Sloup / Pilíř
+                            </button>
+                            <button onclick="spawnObject('STAIRS')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-stairs text-amber-500"></i> Schodiště
+                            </button>
+                            <button onclick="spawnObject('FLOOR_TILE')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-border-all text-neutral-600"></i> Podlaha Tile
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Nábytek & Rekvizity -->
+                    <div>
+                        <div class="text-[11px] font-bold text-amber-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <i class="fa-solid fa-couch"></i> Nábytek & Interiér
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs">
+                            <button onclick="spawnObject('DESK')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-table text-amber-700"></i> Stůl / Kancelář
+                            </button>
+                            <button onclick="spawnObject('CHAIR')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-chair text-amber-800"></i> Židle
+                            </button>
+                            <button onclick="spawnObject('MED_BED')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-bed-pulse text-cyan-500"></i> Zdravotní Lůžko
+                            </button>
+                            <button onclick="spawnObject('CABINET')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-box-archive text-slate-400"></i> Skříň / Archív
+                            </button>
+                            <button onclick="spawnObject('CRATE')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-box text-amber-600"></i> Dřevěná Bedna
+                            </button>
+                            <button onclick="spawnObject('BARREL')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-drum text-red-600"></i> Barel / Sud
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Horor Rekvizity & Pickupy -->
+                    <div>
+                        <div class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <i class="fa-solid fa-droplet"></i> Horor & Předměty
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs">
+                            <button onclick="spawnObject('BLOOD_DECAL')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-skull-crossbones text-red-600"></i> Krvavá Skvrna
+                            </button>
+                            <button onclick="spawnObject('ITEM_SPRAY')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-spray-can text-green-500"></i> First Aid Spray
+                            </button>
+                            <button onclick="spawnObject('ITEM_AMMO')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-boxes-packing text-yellow-500"></i> Náboje (Handgun)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ENTITIES TAB CONTENT -->
+                <div id="palette-entities-sec" class="space-y-4 hidden">
+                    <!-- NPC & Nepřátelé -->
+                    <div>
+                        <div class="text-[11px] font-bold text-green-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <i class="fa-solid fa-biohazard"></i> NPC / Nepřátelé / Spojenci
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs">
+                            <button onclick="spawnObject('ZOMBIE_WALKER')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-person-walking text-green-500"></i> Zombie Chodec
+                            </button>
+                            <button onclick="spawnObject('ZOMBIE_RUNNER')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-person-running text-red-500"></i> Zombie Běžec
+                            </button>
+                            <button onclick="spawnObject('SURVIVOR_ALLY')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-user-shield text-blue-400"></i> Přeživší / Spojenec
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Systémové Prvky -->
+                    <div>
+                        <div class="text-[11px] font-bold text-blue-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <i class="fa-solid fa-sliders"></i> Kamery & Světla
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 text-xs">
+                            <button onclick="spawnObject('CAMERA')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-camera text-blue-400"></i> RE Kamera (Fixed)
+                            </button>
+                            <button onclick="spawnObject('TRIGGER')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-vector-square text-purple-400"></i> Camera Trigger
+                            </button>
+                            <button onclick="spawnObject('LIGHT_POINT')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-lightbulb text-yellow-400"></i> Žárovka / Světlo
+                            </button>
+                            <button onclick="spawnObject('LIGHT_SPOT')" class="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 p-2 rounded text-left border border-neutral-800 flex items-center gap-2">
+                                <i class="fa-solid fa-video text-amber-500"></i> Bodový Reflektor
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hierarchy Tree Section -->
+            <div class="h-56 border-t border-neutral-800 flex flex-col bg-neutral-950">
+                <div class="p-2 bg-neutral-900/80 border-b border-neutral-800 flex justify-between items-center text-xs">
+                    <span class="font-bold text-neutral-400 uppercase tracking-wider">Hierarchie Scény</span>
+                    <span id="object-count" class="font-mono text-neutral-500">0 prvků</span>
+                </div>
+                <div id="hierarchy-list" class="flex-1 overflow-y-auto p-2 space-y-1 text-xs">
+                    <!-- Dynamic List -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center Viewport Container -->
+        <main class="flex-1 relative bg-black overflow-hidden flex flex-col">
+            <div id="canvas-container" class="w-full h-full relative"></div>
+
+            <!-- Retro Shaders / Screen Effect Layers -->
+            <div id="crt-layer" class="crt-overlay"></div>
+            <div class="vignette-overlay"></div>
+
+            <!-- Viewport Floating Controls -->
+            <div id="editor-controls-bar" class="absolute top-4 left-4 z-20 bg-neutral-950/90 backdrop-blur-md p-1.5 rounded-lg border border-neutral-800 flex items-center gap-2 shadow-xl">
+                <button onclick="setGizmoMode('translate')" class="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-200 border border-neutral-700" title="Posun (G)">
+                    <i class="fa-solid fa-arrows-up-down-left-right"></i> Posun
+                </button>
+                <button onclick="setGizmoMode('rotate')" class="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-200 border border-neutral-700" title="Rotace (R)">
+                    <i class="fa-solid fa-rotate"></i> Rotace
+                </button>
+                <button onclick="setGizmoMode('scale')" class="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-xs text-neutral-200 border border-neutral-700" title="Měřítko (S)">
+                    <i class="fa-solid fa-expand"></i> Měřítko
+                </button>
+                <div class="h-4 w-px bg-neutral-800 my-auto"></div>
+                <button id="btn-toggle-helpers" onclick="toggleEditorHelpers()" class="px-2.5 py-1 rounded bg-red-900/50 text-red-200 text-xs border border-red-700">
+                    <i class="fa-solid fa-eye"></i> Pomocné Mřížky
+                </button>
+            </div>
+
+            <!-- Active Security Camera Indicator Tag -->
+            <div class="absolute top-4 right-4 z-20 bg-black/80 backdrop-blur px-3 py-1.5 rounded border border-neutral-800 text-xs font-mono text-red-500 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-red-600 animate-ping"></span>
+                <span>KAMERA: <span id="current-camera-name" class="text-white font-bold">EDITOR FREE CAM</span></span>
+            </div>
+
+            <!-- Gameplay Overlay HUD (PS2 Biohazard Style) -->
+            <div id="gameplay-hud" class="hidden absolute inset-0 pointer-events-none z-30 flex flex-col justify-between p-6">
+                <div class="flex justify-between items-start">
+                    <!-- ECG Monitor -->
+                    <div class="bg-black/85 p-3 rounded-md border border-neutral-800 flex items-center space-x-4 shadow-2xl">
+                        <div class="w-28 h-10 relative overflow-hidden bg-neutral-950 border border-neutral-800 rounded">
+                            <svg class="w-full h-full" viewBox="0 0 100 30">
+                                <path id="hud-ecg-path" class="hud-ecg-line" fill="none" stroke-width="2" d="M 0 15 L 20 15 L 25 5 L 30 25 L 35 10 L 40 18 L 45 15 L 100 15"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <div id="hud-health-text" class="text-xs font-bold text-green-500 uppercase font-mono tracking-wider">STAV: FINE (100%)</div>
+                            <div class="text-[10px] text-neutral-400">J. VALENTINE | RACCOON SURVIVOR</div>
+                        </div>
+                    </div>
+
+                    <!-- Weapon & Ammo Display -->
+                    <div class="bg-black/85 px-4 py-2.5 rounded-md border border-neutral-800 text-right shadow-2xl">
+                        <div class="text-xs font-bold text-amber-500 uppercase font-mono"><i class="fa-solid fa-gun"></i> 9mm Handgun</div>
+                        <div class="text-lg font-mono text-white font-bold"><span id="hud-ammo-count">15</span> / <span class="text-neutral-500">45</span></div>
+                    </div>
+                </div>
+
+                <!-- Controls Prompt Bar -->
+                <div class="self-center bg-black/90 px-6 py-2.5 rounded-full border border-neutral-800 text-xs font-mono text-neutral-300 flex items-center space-x-6 shadow-2xl">
+                    <span><kbd class="bg-neutral-800 px-1.5 py-0.5 rounded text-white">W,A,S,D</kbd> Pohyb (Tank)</span>
+                    <span><kbd class="bg-neutral-800 px-1.5 py-0.5 rounded text-white">SPACE</kbd> Mířit</span>
+                    <span><kbd class="bg-neutral-800 px-1.5 py-0.5 rounded text-white">E / LMB</kbd> Střelba</span>
+                    <span><kbd class="bg-neutral-800 px-1.5 py-0.5 rounded text-white">F</kbd> Svítilna</span>
+                    <span><kbd class="bg-neutral-800 px-1.5 py-0.5 rounded text-white">ESC</kbd> Editor Mode</span>
+                </div>
+            </div>
+
+            <!-- Custom Modal Notification Box -->
+            <div id="custom-modal" class="hidden absolute inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+                <div class="bg-neutral-900 border border-red-800 p-6 rounded-lg max-w-sm w-full text-center space-y-4 shadow-2xl">
+                    <div class="text-red-500 text-2xl"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                    <div id="modal-message-text" class="text-sm text-neutral-200">Zpráva systému</div>
+                    <button onclick="closeCustomModal()" class="px-4 py-1.5 bg-red-900 hover:bg-red-800 text-white rounded text-xs uppercase font-bold">Rozumím</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel: Inspector -->
+        <aside id="panel-right" class="w-80 bg-neutral-950 border-l border-neutral-800 flex flex-col z-20">
+            <div class="p-3 border-b border-neutral-800 flex justify-between items-center">
+                <span class="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-sliders text-red-600"></i> Inspektor Objektu
+                </span>
+                <button onclick="deleteSelectedObject()" class="text-xs text-red-500 hover:text-red-400 bg-red-950/40 hover:bg-red-900/60 px-2 py-1 rounded border border-red-800 flex items-center gap-1">
+                    <i class="fa-solid fa-trash"></i> Smazat
+                </button>
+            </div>
+
+            <div id="inspector-content" class="flex-1 overflow-y-auto p-4 space-y-5 text-xs">
+                <div class="text-neutral-500 italic text-center py-8">Vyberte objekt ze scény pro úpravu vlastností.</div>
+            </div>
+        </aside>
+
+    </div>
+
+    <script>
+        /* Engine Core State */
+        let scene, renderer, editorCamera, activeGameCamera;
+        let orbitControls, transformControls;
+        let engineMode = 'EDITOR'; // 'EDITOR' or 'GAME'
+        let snapGrid = true, snapRot = true;
+
+        // Global Scene Lights (Fixed scene darkness)
+        let ambientLight, editorSunLight, hemisphereLight;
+
+        const sceneObjects = [];
+        let selectedObject = null;
+        let showHelpers = true;
+
+        // Player & Gameplay State
+        let playerMesh, playerFlashlight;
+        let playerHealth = 100;
+        let playerAmmo = 15;
+        let isAiming = false;
+        const playerState = {
+            pos: new THREE.Vector3(0, 0, 0),
+            speed: 0.075,
+            rotSpeed: 0.045,
+            flashlightOn: true
+        };
+        const keys = {};
+
+        /* Procedural Web Audio API Sound Generator */
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+
+            if (type === 'GUNSHOT') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.exponentialRampToValueAtTime(10, now + 0.25);
+                gain.gain.setValueAtTime(0.8, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.25);
+            } else if (type === 'FOOTSTEP') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(90, now);
+                osc.frequency.exponentialRampToValueAtTime(20, now + 0.08);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.08);
+            } else if (type === 'ZOMBIE_GROAN') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(90, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 0.8);
+                gain.gain.setValueAtTime(0.35, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.8);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.8);
+            } else if (type === 'CLICK') {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.frequency.setValueAtTime(800, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.03);
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start(); osc.stop(now + 0.03);
+            }
+        }
+
+        function showCustomModal(msg) {
+            document.getElementById('modal-message-text').innerText = msg;
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeCustomModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        const container = document.getElementById('canvas-container');
+
+        // Master Engine Initialization
+        function initEngine() {
+            scene = new THREE.Scene();
+            
+            // Lighter atmospheric background color so scene is clearly illuminated
+            scene.background = new THREE.Color(0x0c0e14);
+            scene.fog = new THREE.FogExp2(0x0c0e14, 0.012); // Reduced density to prevent total blackness
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.1; // Increased exposure
+            container.appendChild(renderer.domElement);
+
+            editorCamera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+            editorCamera.position.set(10, 8, 12);
+
+            orbitControls = new THREE.OrbitControls(editorCamera, renderer.domElement);
+            orbitControls.enableDamping = true;
+            orbitControls.dampingFactor = 0.05;
+
+            transformControls = new THREE.TransformControls(editorCamera, renderer.domElement);
+            transformControls.size = 0.75;
+            transformControls.setTranslationSnap(1);
+            transformControls.setRotationSnap(THREE.MathUtils.degToRad(45));
+            transformControls.addEventListener('dragging-changed', (e) => { orbitControls.enabled = !e.value; });
+            transformControls.addEventListener('change', () => { if (selectedObject) updateInspectorValues(); });
+            scene.add(transformControls);
+
+            buildDefaultRoom();
+            spawnPlayer();
+            buildDefaultEntities();
+
+            // Keyboard & Interaction Listeners
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('click', () => initAudio());
+            window.addEventListener('keydown', (e) => {
+                keys[e.key.toLowerCase()] = true;
+                if (e.key === 'Escape' && engineMode === 'GAME') switchEngineMode('EDITOR');
+                if (e.key === 'f' || e.key === 'F') toggleFlashlight();
+                if (e.key === 'g' || e.key === 'G') setGizmoMode('translate');
+                if (e.key === 'r' || e.key === 'R') setGizmoMode('rotate');
+                if (e.key === 's' || e.key === 'S') setGizmoMode('scale');
+                if (e.code === 'Space' && engineMode === 'GAME') isAiming = true;
+                if ((e.key === 'e' || e.key === 'E') && engineMode === 'GAME') shootWeapon();
+            });
+            window.addEventListener('keyup', (e) => {
+                keys[e.key.toLowerCase()] = false;
+                if (e.code === 'Space') isAiming = false;
+            });
+
+            // Raycaster Object Selector
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            renderer.domElement.addEventListener('pointerdown', (event) => {
+                if (engineMode !== 'EDITOR' || transformControls.dragging) return;
+                const rect = renderer.domElement.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, editorCamera);
+                const interactableMeshes = sceneObjects.map(o => o.mesh).filter(m => m !== null);
+                const intersects = raycaster.intersectObjects(interactableMeshes, true);
+
+                if (intersects.length > 0) {
+                    let topObj = intersects[0].object;
+                    while (topObj.parent && topObj.parent !== scene && !topObj.userData.engineId) {
+                        topObj = topObj.parent;
+                    }
+                    if (topObj.userData.engineId) selectObjectById(topObj.userData.engineId);
+                }
+            });
+
+            animate();
+            updateHierarchyUI();
+        }
+
+        function buildDefaultRoom() {
+            // Floor Grid with high contrast red/slate lines
+            const gridHelper = new THREE.GridHelper(30, 30, 0xdc2626, 0x334155);
+            gridHelper.position.y = 0.01;
+            gridHelper.name = "EditorGrid";
+            scene.add(gridHelper);
+
+            // 1. Ambient Light (Sky/Ground fill)
+            ambientLight = new THREE.AmbientLight(0x8a92a6, 0.95);
+            scene.add(ambientLight);
+
+            // 2. Hemisphere Light for detailed specular reflections
+            hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x222a38, 0.6);
+            hemisphereLight.position.set(0, 20, 0);
+            scene.add(hemisphereLight);
+
+            // 3. Directional Editor Sun Light for shadows and depth
+            editorSunLight = new THREE.DirectionalLight(0xfff8ee, 1.1);
+            editorSunLight.position.set(12, 18, 10);
+            editorSunLight.castShadow = true;
+            editorSunLight.shadow.mapSize.width = 2048;
+            editorSunLight.shadow.mapSize.height = 2048;
+            editorSunLight.shadow.bias = -0.0005;
+            scene.add(editorSunLight);
+        }
+
+        function spawnPlayer() {
+            const group = new THREE.Group();
+
+            const body = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.3, 0.25, 1.4, 8),
+                new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.3, metalness: 0.1 })
+            );
+            body.position.y = 0.7;
+            body.castShadow = true;
+            group.add(body);
+
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.2, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.5 })
+            );
+            head.position.y = 1.5;
+            head.castShadow = true;
+            group.add(head);
+
+            playerFlashlight = new THREE.SpotLight(0xfff5d1, 8, 16, Math.PI / 4, 0.4, 1);
+            playerFlashlight.position.set(0, 1.2, 0.2);
+            playerFlashlight.target.position.set(0, 1.0, 4);
+            playerFlashlight.castShadow = true;
+            group.add(playerFlashlight);
+            group.add(playerFlashlight.target);
+
+            group.position.set(0, 0, 5);
+            scene.add(group);
+
+            const engineObj = {
+                id: 'player_main',
+                name: 'Hráč (Jill)',
+                type: 'PLAYER',
+                mesh: group,
+                properties: {}
+            };
+            group.userData.engineId = engineObj.id;
+            sceneObjects.push(engineObj);
+            playerMesh = group;
+        }
+
+        function buildDefaultEntities() {
+            // Default Cameras & Triggers
+            const cam1 = spawnObject('CAMERA', { name: 'Kamera 1 - Vchod', pos: [-7, 4.5, 9] });
+            cam1.mesh.lookAt(0, 1, 4);
+
+            const cam2 = spawnObject('CAMERA', { name: 'Kamera 2 - Chodba', pos: [7, 3.5, -6] });
+            cam2.mesh.lookAt(0, 1, -2);
+
+            spawnObject('TRIGGER', { name: 'Zóna Vchod', pos: [0, 1, 5], scale: [14, 3, 8], targetCameraId: cam1.id });
+            spawnObject('TRIGGER', { name: 'Zóna Chodba', pos: [0, 1, -3], scale: [14, 3, 8], targetCameraId: cam2.id });
+
+            // Default Room Layout Architecture
+            spawnObject('FLOOR_TILE', { pos: [0, 0, 0], scale: [16, 0.1, 20] });
+            spawnObject('WALL', { pos: [0, 2.5, -10], scale: [16, 5, 0.4] });
+            spawnObject('WALL', { pos: [-8, 2.5, 0], scale: [0.4, 5, 20] });
+            spawnObject('WALL', { pos: [8, 2.5, 0], scale: [0.4, 5, 20] });
+
+            spawnObject('DOORWAY', { pos: [0, 0, -9.8] });
+            spawnObject('DESK', { pos: [-4, 0, -2] });
+            spawnObject('MED_BED', { pos: [4, 0, -4] });
+            spawnObject('BLOOD_DECAL', { pos: [1, 0.02, 1] });
+            spawnObject('ITEM_SPRAY', { pos: [-3.5, 0.85, -2] });
+            spawnObject('ITEM_AMMO', { pos: [3.5, 0.65, -4] });
+            spawnObject('ZOMBIE_WALKER', { name: 'Zombie Sestra', pos: [2, 0, -4] });
+
+            activeGameCamera = cam1.cameraObj;
+        }
+
+        function spawnObject(type, customProps = {}) {
+            const id = 'obj_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+            let mesh = null;
+            let cameraObj = null;
+
+            switch (type) {
+                /* ARCHITECTURE */
+                case 'WALL':
+                    mesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(1, 1, 1), 
+                        new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6, metalness: 0.1 })
+                    );
+                    if (!customProps.scale) customProps.scale = [4, 4, 0.4];
+                    break;
+
+                case 'DOORWAY':
+                    mesh = new THREE.Group();
+                    const frame = new THREE.Mesh(
+                        new THREE.BoxGeometry(2, 3.2, 0.3), 
+                        new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.7 })
+                    );
+                    const door = new THREE.Mesh(
+                        new THREE.BoxGeometry(1.6, 2.8, 0.1), 
+                        new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.5 })
+                    );
+                    door.position.set(0, 0, 0); frame.position.y = 1.6;
+                    mesh.add(frame); mesh.add(door);
+                    break;
+
+                case 'WINDOW_WALL':
+                    mesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(4, 4, 0.4), 
+                        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 })
+                    );
+                    const glass = new THREE.Mesh(
+                        new THREE.PlaneGeometry(2, 1.5), 
+                        new THREE.MeshPhysicalMaterial({ color: 0x38bdf8, transmission: 0.85, transparent: true, opacity: 0.7 })
+                    );
+                    glass.position.set(0, 0, 0.21); mesh.add(glass);
+                    break;
+
+                case 'PILLAR':
+                    mesh = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.4, 0.4, 4, 12), 
+                        new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 })
+                    );
+                    mesh.position.y = 2;
+                    break;
+
+                case 'STAIRS':
+                    mesh = new THREE.Group();
+                    for(let i=0; i<6; i++) {
+                        const step = new THREE.Mesh(
+                            new THREE.BoxGeometry(2, 0.3, 0.4), 
+                            new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.6 })
+                        );
+                        step.position.set(0, i*0.3 + 0.15, -i*0.4);
+                        mesh.add(step);
+                    }
+                    break;
+
+                case 'FLOOR_TILE':
+                    mesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(1, 0.1, 1), 
+                        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.2, metalness: 0.2 })
+                    );
+                    if (!customProps.scale) customProps.scale = [10, 0.1, 10];
+                    break;
+
+                /* FURNITURE & PROPS */
+                case 'DESK':
+                    mesh = new THREE.Group();
+                    const top = new THREE.Mesh(
+                        new THREE.BoxGeometry(2, 0.1, 1), 
+                        new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.4 })
+                    );
+                    top.position.y = 0.8; mesh.add(top);
+                    const leg1 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0x1c1917 }));
+                    leg1.position.set(-0.9, 0.4, -0.4); mesh.add(leg1);
+                    const leg2 = leg1.clone(); leg2.position.set(0.9, 0.4, -0.4); mesh.add(leg2);
+                    const leg3 = leg1.clone(); leg3.position.set(-0.9, 0.4, 0.4); mesh.add(leg3);
+                    const leg4 = leg1.clone(); leg4.position.set(0.9, 0.4, 0.4); mesh.add(leg4);
+                    break;
+
+                case 'CHAIR':
+                    mesh = new THREE.Group();
+                    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.6), new THREE.MeshStandardMaterial({ color: 0x3f3f46 }));
+                    seat.position.y = 0.4; mesh.add(seat);
+                    const back = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.08), new THREE.MeshStandardMaterial({ color: 0x3f3f46 }));
+                    back.position.set(0, 0.7, -0.26); mesh.add(back);
+                    break;
+
+                case 'MED_BED':
+                    mesh = new THREE.Group();
+                    const bedFrame = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 2.2), new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.3 }));
+                    bedFrame.position.y = 0.25; mesh.add(bedFrame);
+                    const mattress = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.2, 2.1), new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 }));
+                    mattress.position.y = 0.6; mesh.add(mattress);
+                    break;
+
+                case 'CABINET':
+                    mesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.6), new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.4 }));
+                    mesh.position.y = 1.1;
+                    break;
+
+                case 'CRATE':
+                    mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.8 }));
+                    mesh.position.y = 0.5;
+                    break;
+
+                case 'BARREL':
+                    mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.2, 12), new THREE.MeshStandardMaterial({ color: 0xdc2626, metalness: 0.4, roughness: 0.3 }));
+                    mesh.position.y = 0.6;
+                    break;
+
+                case 'BLOOD_DECAL':
+                    mesh = new THREE.Mesh(
+                        new THREE.PlaneGeometry(2, 2), 
+                        new THREE.MeshBasicMaterial({ color: 0x991b1b, transparent: true, opacity: 0.88, depthWrite: false })
+                    );
+                    mesh.rotation.x = -Math.PI / 2;
+                    break;
+
+                case 'ITEM_SPRAY':
+                    mesh = new THREE.Group();
+                    const sprayCan = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.35, 8), new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.2, metalness: 0.5 }));
+                    sprayCan.position.y = 0.175; mesh.add(sprayCan);
+                    mesh.userData.isPickup = true;
+                    break;
+
+                case 'ITEM_AMMO':
+                    mesh = new THREE.Group();
+                    const ammoBox = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.35), new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.3, metalness: 0.6 }));
+                    ammoBox.position.y = 0.1; mesh.add(ammoBox);
+                    mesh.userData.isPickup = true;
+                    break;
+
+                /* NPC & ENEMIES */
+                case 'ZOMBIE_WALKER':
+                case 'ZOMBIE_RUNNER':
+                    mesh = new THREE.Group();
+                    const zColor = type === 'ZOMBIE_RUNNER' ? 0xdc2626 : 0x16a34a;
+                    const zBody = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 1.4, 8), new THREE.MeshStandardMaterial({ color: zColor, roughness: 0.5 }));
+                    zBody.position.y = 0.7; mesh.add(zBody);
+                    const zHead = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshStandardMaterial({ color: 0x65a30d }));
+                    zHead.position.y = 1.5; mesh.add(zHead);
+                    break;
+
+                case 'SURVIVOR_ALLY':
+                    mesh = new THREE.Group();
+                    const sBody = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 1.4, 8), new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.4 }));
+                    sBody.position.y = 0.7; mesh.add(sBody);
+                    const sHead = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshStandardMaterial({ color: 0xfacc15 }));
+                    sHead.position.y = 1.5; mesh.add(sHead);
+                    break;
+
+                /* SYSTEM / LIGHTS / CAMERAS */
+                case 'CAMERA':
+                    mesh = new THREE.Group();
+                    cameraObj = new THREE.PerspectiveCamera(customProps.fov || 50, container.clientWidth / container.clientHeight, 0.1, 50);
+                    mesh.add(cameraObj);
+                    
+                    // Camera Body Mesh
+                    const camVisual = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.6), new THREE.MeshBasicMaterial({ color: 0x3b82f6, wireframe: true }));
+                    mesh.add(camVisual);
+                    // Directional Indicator Cone
+                    const camCone = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 4), new THREE.MeshBasicMaterial({ color: 0x60a5fa, wireframe: true }));
+                    camCone.rotation.x = -Math.PI / 2; camCone.position.z = -0.4;
+                    mesh.add(camCone);
+                    break;
+
+                case 'TRIGGER':
+                    mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xc084fc, wireframe: true, transparent: true, opacity: 0.6 }));
+                    break;
+
+                case 'LIGHT_POINT':
+                    mesh = new THREE.Group();
+                    const pt = new THREE.PointLight(0xffb703, 5, 12); pt.castShadow = true; mesh.add(pt);
+                    mesh.add(new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffb703, wireframe: true })));
+                    break;
+
+                case 'LIGHT_SPOT':
+                    mesh = new THREE.Group();
+                    const sp = new THREE.SpotLight(0xef4444, 7, 14, Math.PI/4, 0.5); sp.castShadow = true; mesh.add(sp);
+                    mesh.add(new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.5, 8), new THREE.MeshBasicMaterial({ color: 0xef4444, wireframe: true })));
+                    break;
+            }
+
+            if (mesh) {
+                mesh.traverse(child => { if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; } });
+                if (customProps.pos) mesh.position.set(...customProps.pos);
+                if (customProps.scale) mesh.scale.set(...customProps.scale);
+                if (customProps.rotY) mesh.rotation.y = customProps.rotY;
+
+                mesh.userData.engineId = id;
+                scene.add(mesh);
+            }
+
+            const engineObj = {
+                id: id,
+                name: customProps.name || `${type}_${sceneObjects.length + 1}`,
+                type: type,
+                mesh: mesh,
+                cameraObj: cameraObj,
+                properties: customProps
+            };
+
+            sceneObjects.push(engineObj);
+            updateHierarchyUI();
+            selectObjectById(id);
+            playSound('CLICK');
+            return engineObj;
+        }
+
+        function switchPaletteTab(tab) {
+            document.getElementById('tab-btn-build').className = tab === 'BUILD' ? "flex-1 py-2.5 bg-neutral-900 text-red-500 border-b-2 border-red-600 flex items-center justify-center gap-1.5" : "flex-1 py-2.5 bg-neutral-950 text-neutral-400 hover:text-white flex items-center justify-center gap-1.5";
+            document.getElementById('tab-btn-entities').className = tab === 'ENTITIES' ? "flex-1 py-2.5 bg-neutral-900 text-red-500 border-b-2 border-red-600 flex items-center justify-center gap-1.5" : "flex-1 py-2.5 bg-neutral-950 text-neutral-400 hover:text-white flex items-center justify-center gap-1.5";
+
+            document.getElementById('palette-build-sec').classList.toggle('hidden', tab !== 'BUILD');
+            document.getElementById('palette-entities-sec').classList.toggle('hidden', tab !== 'ENTITIES');
+        }
+
+        function updateHierarchyUI() {
+            const listContainer = document.getElementById('hierarchy-list');
+            listContainer.innerHTML = '';
+            document.getElementById('object-count').innerText = `${sceneObjects.length} prvků`;
+
+            sceneObjects.forEach(obj => {
+                const item = document.createElement('div');
+                item.className = `p-2 rounded cursor-pointer flex items-center justify-between border transition ${selectedObject && selectedObject.id === obj.id ? 'bg-red-950/60 border-red-800 text-white' : 'bg-neutral-900/60 border-neutral-800/80 hover:bg-neutral-800/80 text-neutral-300'}`;
+                
+                let icon = 'fa-cube';
+                if (obj.type.includes('ZOMBIE')) icon = 'fa-biohazard text-green-500';
+                if (obj.type === 'PLAYER') icon = 'fa-user text-blue-400';
+                if (obj.type === 'CAMERA') icon = 'fa-camera text-blue-400';
+                if (obj.type === 'TRIGGER') icon = 'fa-vector-square text-purple-400';
+
+                item.innerHTML = `
+                    <div class="flex items-center space-x-2 truncate">
+                        <i class="fa-solid ${icon} w-4 text-center"></i>
+                        <span class="truncate font-medium">${obj.name}</span>
+                    </div>
+                    <span class="text-[10px] font-mono text-neutral-500 uppercase">${obj.type.split('_')[0]}</span>
+                `;
+
+                item.onclick = () => selectObjectById(obj.id);
+                listContainer.appendChild(item);
+            });
+        }
+
+        function selectObjectById(id) {
+            const found = sceneObjects.find(o => o.id === id);
+            if (!found) return;
+
+            selectedObject = found;
+            if (engineMode === 'EDITOR' && found.mesh) {
+                transformControls.attach(found.mesh);
+            }
+            updateHierarchyUI();
+            renderInspector();
+        }
+
+        function renderInspector() {
+            const container = document.getElementById('inspector-content');
+            if (!selectedObject) {
+                container.innerHTML = `<div class="text-neutral-500 italic text-center py-8">Vyberte objekt ze scény.</div>`;
+                return;
+            }
+
+            const m = selectedObject.mesh;
+            const p = m.position; const s = m.scale;
+
+            let html = `
+                <div>
+                    <label class="text-[11px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Název Objektu</label>
+                    <input type="text" value="${selectedObject.name}" onchange="updateSelectedObjectName(this.value)">
+                </div>
+
+                <div class="space-y-3 pt-2 border-t border-neutral-800">
+                    <span class="text-[11px] font-bold text-red-500 uppercase tracking-wider block">Transformace</span>
+                    <div>
+                        <span class="text-[10px] text-neutral-400 block mb-1">Pozice (X, Y, Z)</span>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <input type="number" step="0.5" id="insp-pos-x" value="${p.x.toFixed(2)}" oninput="applyInspectorTransform()">
+                            <input type="number" step="0.5" id="insp-pos-y" value="${p.y.toFixed(2)}" oninput="applyInspectorTransform()">
+                            <input type="number" step="0.5" id="insp-pos-z" value="${p.z.toFixed(2)}" oninput="applyInspectorTransform()">
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-neutral-400 block mb-1">Měřítko (X, Y, Z)</span>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <input type="number" step="0.1" id="insp-scale-x" value="${s.x.toFixed(2)}" oninput="applyInspectorTransform()">
+                            <input type="number" step="0.1" id="insp-scale-y" value="${s.y.toFixed(2)}" oninput="applyInspectorTransform()">
+                            <input type="number" step="0.1" id="insp-scale-z" value="${s.z.toFixed(2)}" oninput="applyInspectorTransform()">
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (selectedObject.type === 'TRIGGER') {
+                const targetCams = sceneObjects.filter(o => o.type === 'CAMERA');
+                html += `
+                    <div class="pt-3 border-t border-neutral-800 space-y-2">
+                        <span class="text-[11px] font-bold text-purple-400 uppercase tracking-wider block">Cílová Kamera</span>
+                        <select onchange="updateTriggerTarget(this.value)">
+                            <option value="">-- Vyberte kameru --</option>
+                            ${targetCams.map(c => `<option value="${c.id}" ${selectedObject.properties.targetCameraId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                        </select>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function updateInspectorValues() {
+            if (!selectedObject) return;
+            const m = selectedObject.mesh;
+            const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val.toFixed(2); };
+            setVal('insp-pos-x', m.position.x); setVal('insp-pos-y', m.position.y); setVal('insp-pos-z', m.position.z);
+            setVal('insp-scale-x', m.scale.x); setVal('insp-scale-y', m.scale.y); setVal('insp-scale-z', m.scale.z);
+        }
+
+        function applyInspectorTransform() {
+            if (!selectedObject) return;
+            const m = selectedObject.mesh;
+            const getVal = (id) => parseFloat(document.getElementById(id).value) || 0;
+            m.position.set(getVal('insp-pos-x'), getVal('insp-pos-y'), getVal('insp-pos-z'));
+            m.scale.set(getVal('insp-scale-x'), getVal('insp-scale-y'), getVal('insp-scale-z'));
+        }
+
+        function updateSelectedObjectName(val) {
+            if (selectedObject) { selectedObject.name = val; updateHierarchyUI(); }
+        }
+
+        function updateTriggerTarget(camId) {
+            if (selectedObject) selectedObject.properties.targetCameraId = camId;
+        }
+
+        function deleteSelectedObject() {
+            if (!selectedObject) return;
+            if (selectedObject.type === 'PLAYER') {
+                showCustomModal('Hráče nelze smazat ze scény!');
+                return;
+            }
+            transformControls.detach();
+            scene.remove(selectedObject.mesh);
+            const idx = sceneObjects.indexOf(selectedObject);
+            if (idx > -1) sceneObjects.splice(idx, 1);
+            selectedObject = null;
+            updateHierarchyUI(); renderInspector();
+        }
+
+        function setGizmoMode(mode) { transformControls.setMode(mode); }
+        function toggleSnapGrid(val) { snapGrid = val; transformControls.setTranslationSnap(val ? 1 : null); }
+        function toggleSnapRot(val) { snapRot = val; transformControls.setRotationSnap(val ? THREE.MathUtils.degToRad(45) : null); }
+
+        function toggleEditorHelpers() {
+            showHelpers = !showHelpers;
+            const grid = scene.getObjectByName("EditorGrid");
+            if (grid) grid.visible = showHelpers;
+            sceneObjects.forEach(o => {
+                if (o.type === 'TRIGGER' || o.type === 'CAMERA' || o.type.includes('LIGHT')) {
+                    o.mesh.visible = showHelpers;
+                }
+            });
+            document.getElementById('btn-toggle-helpers').classList.toggle('bg-red-900/50', showHelpers);
+        }
+
+        function applyAtmospherePreset(preset) {
+            switch(preset) {
+                case 'EDITOR_BRIGHT':
+                    ambientLight.color.setHex(0x8a92a6); ambientLight.intensity = 0.95;
+                    editorSunLight.color.setHex(0xfff8ee); editorSunLight.intensity = 1.1;
+                    scene.fog.density = 0.012;
+                    break;
+                case 'HOSPITAL_DIM':
+                    ambientLight.color.setHex(0x223040); ambientLight.intensity = 0.35;
+                    editorSunLight.color.setHex(0x38bdf8); editorSunLight.intensity = 0.3;
+                    scene.fog.density = 0.035;
+                    break;
+                case 'RPD_RED':
+                    ambientLight.color.setHex(0x501010); ambientLight.intensity = 0.4;
+                    editorSunLight.color.setHex(0xef4444); editorSunLight.intensity = 0.6;
+                    scene.fog.density = 0.025;
+                    break;
+                case 'DARK_HORROR':
+                    ambientLight.color.setHex(0x0a0c10); ambientLight.intensity = 0.15;
+                    editorSunLight.color.setHex(0x1e293b); editorSunLight.intensity = 0.1;
+                    scene.fog.density = 0.05;
+                    break;
+            }
+        }
+
+        function switchEngineMode(mode) {
+            engineMode = mode;
+            const btnEdit = document.getElementById('btn-mode-editor');
+            const btnGame = document.getElementById('btn-mode-game');
+            const hud = document.getElementById('gameplay-hud');
+            const controlsBar = document.getElementById('editor-controls-bar');
+            const panelLeft = document.getElementById('panel-left');
+            const panelRight = document.getElementById('panel-right');
+
+            if (mode === 'GAME') {
+                btnEdit.className = "px-3 py-1.5 rounded text-xs font-semibold bg-neutral-900 border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition flex items-center gap-2";
+                btnGame.className = "px-3 py-1.5 rounded text-xs font-semibold bg-red-950/60 border border-red-700 text-red-200 hover:bg-red-800 transition flex items-center gap-2 horror-border-active";
+                hud.classList.remove('hidden');
+                controlsBar.classList.add('hidden');
+                panelLeft.classList.add('hidden');
+                panelRight.classList.add('hidden');
+                transformControls.detach();
+                orbitControls.enabled = false;
+
+                // Dim general lights for survival horror feel
+                ambientLight.intensity = 0.25;
+                editorSunLight.intensity = 0.2;
+
+                sceneObjects.forEach(o => { if (o.type === 'TRIGGER') o.mesh.visible = false; });
+            } else {
+                btnGame.className = "px-3 py-1.5 rounded text-xs font-semibold bg-neutral-900 border border-neutral-700 text-neutral-400 hover:bg-neutral-800 transition flex items-center gap-2";
+                btnEdit.className = "px-3 py-1.5 rounded text-xs font-semibold bg-red-950/60 border border-red-700 text-red-200 hover:bg-red-800 transition flex items-center gap-2 horror-border-active";
+                hud.classList.add('hidden');
+                controlsBar.classList.remove('hidden');
+                panelLeft.classList.remove('hidden');
+                panelRight.classList.remove('hidden');
+                orbitControls.enabled = true;
+                document.getElementById('current-camera-name').innerText = "EDITOR FREE CAM";
+
+                // Restore bright editor lighting preset
+                const activePreset = document.getElementById('preset-atmosphere-select').value;
+                applyAtmospherePreset(activePreset);
+
+                sceneObjects.forEach(o => { if (o.type === 'TRIGGER') o.mesh.visible = showHelpers; });
+            }
+            onWindowResize();
+        }
+
+        function toggleFlashlight() {
+            playerState.flashlightOn = !playerState.flashlightOn;
+            playerFlashlight.visible = playerState.flashlightOn;
+            playSound('CLICK');
+        }
+
+        function shootWeapon() {
+            if (playerAmmo <= 0) return;
+            playerAmmo--;
+            document.getElementById('hud-ammo-count').innerText = playerAmmo;
+            playSound('GUNSHOT');
+
+            // Zombie Hit Detection
+            const playerPos = playerMesh.position;
+            sceneObjects.filter(o => o.type.includes('ZOMBIE')).forEach(zombie => {
+                if (zombie.mesh.position.distanceTo(playerPos) < 6) {
+                    scene.remove(zombie.mesh);
+                    const idx = sceneObjects.indexOf(zombie);
+                    if (idx > -1) sceneObjects.splice(idx, 1);
+                    playSound('ZOMBIE_GROAN');
+                    updateHierarchyUI();
+                }
+            });
+        }
+
+        let lastFootstep = 0;
+        function updateGameplayLogic() {
+            // Animate pickup items float & spin
+            const time = Date.now() * 0.003;
+            sceneObjects.filter(o => o.mesh && o.mesh.userData.isPickup).forEach(item => {
+                item.mesh.rotation.y += 0.02;
+                item.mesh.position.y += Math.sin(time) * 0.001;
+            });
+
+            if (engineMode !== 'GAME' || !playerMesh) return;
+
+            // Tank Controls
+            let moved = false;
+            if (keys['w'] || keys['arrowup']) {
+                playerMesh.translateZ(playerState.speed);
+                moved = true;
+            }
+            if (keys['s'] || keys['arrowdown']) {
+                playerMesh.translateZ(-playerState.speed * 0.6);
+                moved = true;
+            }
+            if (keys['a'] || keys['arrowleft']) playerMesh.rotation.y += playerState.rotSpeed;
+            if (keys['d'] || keys['arrowright']) playerMesh.rotation.y -= playerState.rotSpeed;
+
+            if (moved && Date.now() - lastFootstep > 420) {
+                playSound('FOOTSTEP');
+                lastFootstep = Date.now();
+            }
+
+            // Zombie AI Chasing Player
+            const pPos = playerMesh.position;
+            sceneObjects.filter(o => o.type.includes('ZOMBIE')).forEach(z => {
+                const zPos = z.mesh.position;
+                const dist = zPos.distanceTo(pPos);
+                if (dist < 7 && dist > 1.2) {
+                    z.mesh.lookAt(pPos.x, zPos.y, pPos.z);
+                    z.mesh.translateZ(z.type === 'ZOMBIE_RUNNER' ? 0.035 : 0.015);
+                } else if (dist <= 1.2) {
+                    // Attack Player
+                    playerHealth = Math.max(0, playerHealth - 0.2);
+                    const textEl = document.getElementById('hud-health-text');
+                    const pathEl = document.getElementById('hud-ecg-path');
+
+                    if (playerHealth < 30) {
+                        textEl.innerText = `STAV: DANGER (${Math.round(playerHealth)}%)`;
+                        textEl.className = "text-xs font-bold text-red-600 uppercase font-mono tracking-wider";
+                        pathEl.style.stroke = "#dc2626";
+                    } else if (playerHealth < 60) {
+                        textEl.innerText = `STAV: CAUTION (${Math.round(playerHealth)}%)`;
+                        textEl.className = "text-xs font-bold text-amber-500 uppercase font-mono tracking-wider";
+                        pathEl.style.stroke = "#f59e0b";
+                    }
+                }
+            });
+
+            // Camera Triggers Check
+            const playerBB = new THREE.Box3().setFromObject(playerMesh);
+            sceneObjects.filter(o => o.type === 'TRIGGER').forEach(trigger => {
+                const triggerBB = new THREE.Box3().setFromObject(trigger.mesh);
+                if (triggerBB.intersectsBox(playerBB)) {
+                    const targetCamId = trigger.properties.targetCameraId;
+                    if (targetCamId) {
+                        const targetCamObj = sceneObjects.find(o => o.id === targetCamId);
+                        if (targetCamObj && targetCamObj.cameraObj) {
+                            activeGameCamera = targetCamObj.cameraObj;
+                            document.getElementById('current-camera-name').innerText = targetCamObj.name;
+                        }
+                    }
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateGameplayLogic();
+
+            if (engineMode === 'EDITOR') {
+                orbitControls.update();
+                renderer.render(scene, editorCamera);
+            } else {
+                renderer.render(scene, activeGameCamera || editorCamera);
+            }
+        }
+
+        function onWindowResize() {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            editorCamera.aspect = width / height;
+            editorCamera.updateProjectionMatrix();
+
+            sceneObjects.forEach(o => {
+                if (o.cameraObj) {
+                    o.cameraObj.aspect = width / height;
+                    o.cameraObj.updateProjectionMatrix();
+                }
+            });
+            renderer.setSize(width, height);
+        }
+
+        // Preset Template Loaders
+        function loadPresetTemplate(type) {
+            if (!type) return;
+            // Clear current non-player objects
+            [...sceneObjects].forEach(o => {
+                if (o.type !== 'PLAYER') {
+                    scene.remove(o.mesh);
+                    const idx = sceneObjects.indexOf(o);
+                    if (idx > -1) sceneObjects.splice(idx, 1);
+                }
+            });
+
+            if (type === 'HOSPITAL') {
+                buildDefaultEntities();
+            } else if (type === 'POLICE') {
+                const c1 = spawnObject('CAMERA', { name: 'Kamera Lobby Main', pos: [0, 6, 12] });
+                c1.mesh.lookAt(0, 1, 0);
+                spawnObject('TRIGGER', { name: 'Zóna Hlavní Hall', pos: [0, 1, 0], scale: [16, 4, 16], targetCameraId: c1.id });
+                spawnObject('DESK', { name: 'Recepce RPD', pos: [0, 0, 2], scale: [2, 1, 1] });
+                spawnObject('PILLAR', { pos: [-4, 0, 4] }); spawnObject('PILLAR', { pos: [4, 0, 4] });
+                spawnObject('ZOMBIE_RUNNER', { pos: [0, 0, -4] });
+                activeGameCamera = c1.cameraObj;
+            }
+            updateHierarchyUI();
+        }
+
+        function exportSceneJSON() {
+            const data = sceneObjects.map(o => ({
+                id: o.id, name: o.name, type: o.type,
+                pos: [o.mesh.position.x, o.mesh.position.y, o.mesh.position.z],
+                rot: [o.mesh.rotation.x, o.mesh.rotation.y, o.mesh.rotation.z],
+                scale: [o.mesh.scale.x, o.mesh.scale.y, o.mesh.scale.z],
+                properties: o.properties
+            }));
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'biohazard_outbreak_scene.json'; a.click();
+        }
+
+        function importSceneJSON(event) {
+            const file = event.target.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    [...sceneObjects].forEach(o => {
+                        if (o.type !== 'PLAYER') {
+                            scene.remove(o.mesh);
+                            const idx = sceneObjects.indexOf(o);
+                            if (idx > -1) sceneObjects.splice(idx, 1);
+                        }
+                    });
+                    data.forEach(item => {
+                        if (item.type !== 'PLAYER') {
+                            const spawned = spawnObject(item.type, { name: item.name, pos: item.pos, scale: item.scale, ...item.properties });
+                            if (spawned && spawned.mesh) spawned.mesh.rotation.set(...item.rot);
+                        }
+                    });
+                    updateHierarchyUI();
+                } catch (err) {
+                    showCustomModal('Chyba při načítání JSON souboru scény.');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        window.onload = initEngine;
+    </script>
+</body>
+</html>
